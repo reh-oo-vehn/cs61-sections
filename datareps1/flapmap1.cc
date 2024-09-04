@@ -2,13 +2,15 @@
 
 void add_sample(uintptr_t start, size_t duration, size_t flapcount) {
     // Placeholders to avoid compiler warnings. Replace them with your code.
-    (void) start, (void) duration, (void) flapcount; 
+    sample x = { .start = start, .duration = duration, .flapcount = flapcount}; 
+
+    flapmap.insert_or_assign({start, x}); 
+
 }
 
 bool has_sample(uintptr_t t) {
     // Placeholders to avoid compiler warnings. Replace them with your code.
-    (void) t; 
-	return false;
+	return (flapmap.find(t) != flapmap.end());
 }
 
 bool sample_overlaps(uintptr_t start, size_t duration) {
