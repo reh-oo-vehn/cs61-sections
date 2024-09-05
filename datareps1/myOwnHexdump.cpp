@@ -1,8 +1,10 @@
+#include "hexdump.hh"
+
 #include <iostream>
 #include <iomanip> // For formatting output
     
 using namespace std; 
-
+/*
 void hexdump(const void* obj, size_t size) { 
     // Cast to access the contents of the object as a sequence of bytes. 
     const unsigned char* ptr = reinterpret_cast<const unsigned char*>(obj);
@@ -20,11 +22,11 @@ void hexdump(const void* obj, size_t size) {
 struct MyObject {
     int x; 
 };
-
+*/
 int main() {
-    MyObject instance = {42}; 
+    // MyObject instance = {42}; 
 
-
+    /*
     cout << "Hexdump of instance of MyObject\n"; 
 
     // hexdump(&instance, sizeof(instance)); 
@@ -42,6 +44,14 @@ int main() {
     }
 
     cout << endl; 
+
+    */
+
+
+   // You can also choose to use the hexdump function given in cs61. 
+
+    int instance = 0; 
+    hexdump_object(instance); 
 
     return 0; 
 }
