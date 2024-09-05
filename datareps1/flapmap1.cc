@@ -4,7 +4,7 @@ void add_sample(uintptr_t start, size_t duration, size_t flapcount) {
     // Placeholders to avoid compiler warnings. Replace them with your code.
     sample x = { .start = start, .duration = duration, .flapcount = flapcount}; 
 
-    flapmap.insert_or_assign({start, x}); 
+    flapmap.insert({start, x}); 
 
 }
 
