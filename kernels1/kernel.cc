@@ -2,6 +2,7 @@
 #include "k-apic.hh"
 #include "k-vmiter.hh"
 #include "obj/k-firstprocess.h"
+#include <atomic>
 
 // kernel.cc
 //
@@ -23,11 +24,12 @@
 
 #define PROC_SIZE 0x40000       // initial state only
 
-proc ptable[NPROC];             // array of process descriptors
+proc ptable[PID_MAX];           // array of process descriptors
                                 // Note that `ptable[0]` is never used.
 proc* current;                  // pointer to currently executing proc
 
 bool show_memory = false;       // whether to show memory
+extern std::atomic<unsigned long> ticks; // # timer interrupts so far
 
 
 // Memory state - see `kernel.hh`
@@ -50,16 +52,18 @@ static void process_setup(pid_t pid, const char* program_name);
 void kernel_start(const char* command) {
     // initialize hardware
     init_hardware();
+    init_timer(HZ);
     log_printf("Starting WeensyOS\n");
 
     ticks = 1;
-    init_timer(HZ);
 
     // clear screen
     console_clear();
 
     // (re-)initialize kernel page table
-    for (uintptr_t addr = 0; addr < MEMSIZE_PHYSICAL; addr += PAGESIZE) {
+    vmiter it(kernel_pagetable, 0);
+    for (; it.va() < MEMSIZE_PHYSICAL; it += PAGESIZE) {
+        uintptr_t addr = it.va();
         int perm = PTE_P | PTE_W;
         if (addr == 0) {
             // nullptr is inaccessible even to the kernel
@@ -69,13 +73,13 @@ void kernel_start(const char* command) {
             perm |= PTE_U;
         }
         // install identity mapping
-        int r = vmiter(kernel_pagetable, addr).try_map(addr, perm);
+        int r = it.try_map(addr, perm);
         assert(r == 0); // mappings during kernel_start MUST NOT fail
                         // (Note that later mappings might fail!!)
     }
 
     // set up process descriptors
-    for (pid_t i = 0; i < NPROC; i++) {
+    for (pid_t i = 0; i < PID_MAX; i++) {
         ptable[i].pid = i;
         ptable[i].state = P_FREE;
     }
@@ -307,8 +311,7 @@ uintptr_t syscall(regstate* regs) {
 
     // It can be useful to log events using `log_printf`.
     // Events logged this way are stored in the host's `log.txt` file.
-    /* log_printf("proc %d: syscall %d at rip %p\n",
-                  current->pid, regs->reg_rax, regs->reg_rip); */
+    // log_printf("p%d: %s\n", current->pid, syscall_name(regs->reg_rax));
 
     // Show the current cursor location and memory state.
     console_show_cursor(cursorpos);
@@ -322,7 +325,7 @@ uintptr_t syscall(regstate* regs) {
     switch (regs->reg_rax) {
 
     case SYSCALL_PANIC:
-        user_panic(current);
+        user_panic(current);    // does not return
         break; // will not be reached
 
     case SYSCALL_GETPID:
@@ -331,6 +334,7 @@ uintptr_t syscall(regstate* regs) {
     case SYSCALL_YIELD:
         current->regs.reg_rax = 0;
         schedule();             // does not return
+        break; // will not be reached
 
     case SYSCALL_PAGE_ALLOC:
         return syscall_page_alloc(current->regs.reg_rdi);
@@ -389,38 +393,32 @@ pid_t syscall_spawn(const char* command) {
 char pipebuf[1];
 size_t pipebuf_len = 0;
 
-// syscall_pipewrite(buf, sz)
-//    Handles the SYSCALL_PIPEWRITE system call; see `sys_pipewrite`
-//    in `u-lib.hh`.
-
 ssize_t syscall_pipewrite(const char* buf, size_t sz) {
+    // See `sys_pipewrite` in `u-lib.cc` for specification.
     if (sz == 0) {
         // nothing to write
         return 0;
     } else if (pipebuf_len == 1) {
-        // kernel buffer full, try again
-        return -1;
+        // kernel buffer full, process should try again
+        return E_AGAIN;
     } else {
-        // write one character
+        // write one byte
         pipebuf[0] = buf[0];
         pipebuf_len = 1;
         return 1;
     }
 }
 
-// syscall_piperead(buf, sz)
-//    Handles the SYSCALL_PIPEREAD system call; see `sys_piperead`
-//    in `u-lib.hh`.
-
 ssize_t syscall_piperead(char* buf, size_t sz) {
+    // See `sys_piperead` in `u-lib.cc` for specification.
     if (sz == 0) {
         // no room to read
         return 0;
     } else if (pipebuf_len == 0) {
-        // kernel buffer empty, try again
-        return -1;
+        // kernel buffer empty, process should try again
+        return E_AGAIN;
     } else {
-        // read one character
+        // read one byte
         buf[0] = pipebuf[0];
         pipebuf_len = 0;
         return 1;
@@ -435,7 +433,7 @@ ssize_t syscall_piperead(char* buf, size_t sz) {
 void schedule() {
     pid_t pid = current->pid;
     for (unsigned spins = 1; true; ++spins) {
-        pid = (pid + 1) % NPROC;
+        pid = (pid + 1) % PID_MAX;
         if (ptable[pid].state == P_RUNNABLE) {
             run(&ptable[pid]);
         }
